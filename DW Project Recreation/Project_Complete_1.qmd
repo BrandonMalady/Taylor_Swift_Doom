@@ -1,0 +1,1239 @@
+---
+title: "Is Taylor Swift a Harbinger of Doom (R,SQL,Python)"
+format: html
+editor: visual
+self-contained: true
+df-print: paged
+---
+
+Project Members: Brandon Malady, Anusha Ravi
+
+[**Project Outline**]{.underline}
+
+```{css, echo=FALSE}
+body {
+  text-align: justify;
+} 
+```
+
+![](Taylor_DOOM_COVER.png)
+
+**Abstract:** This project aims to explore the potential connection between Taylor Swift’s rise in Stardom and disaster in the United States. As Swift continues to dominate the airwaves, one must ask: could her soaring success be a smokescreen for something far more sinister?
+
+**Data Sources:** FBI — Crime in the U.S. Center, Center for Disease Control and Prevention (National Center for Health Statistics) , Google Trends Data "Taylor Swift"
+
+**Aim 1:** Explore the relationship between Taylor Swift’s popularity and online presence with Violent Crime rates over time in the United States.
+
+Using data collected by the FBI we will explore the potential connection between Swift’s stardom and violent crime rates in the United States. Our data set from the FBI Is broken down per year. This will provide excellent temporal resolution. We will examine the aggregate Taylor Swift interest over time and violent crime rates to see if their is a connection.
+
+**Aim 2:** Investigate deaths from drug overdoses in the United States and its correlation with Taylor Swift’s popularity over time.
+
+Using Data collected by the CDC we will explore the relationship between Taylor Swift’s Popularity and drug overdose deaths in the United States. The data is broken down by year which will ensure we can examine temporal relationships between Taylor’s music and drug overdosages in the American Population. 
+
+::: {.panel-tabset}
+## Data
+
+[**Data Sources & Screenshots**]{.underline}
+
+**Taylor Swift Google Trends Data**
+
+![Google Trends Data for term "Taylor Swift" All time](TS_Google_Trends.png) ![Example of raw data from Google Trends for term "Taylor Swift" All time](Taylot_Interest_Table_Example.png)
+
+Taylor Swift Popularity Data: Source, Google Trends. Numbers represent search interest relative to the highest point on the chart for the United States from 2004-2024. A value of 100 is the peak popularity for the term. A value of 50 means that the term is half as popular. A score of 0 means there was not enough data for this term.
+
+**FBI Crime Data**
+
+![FBI Data Source Page](FBI_SS.png) ![FBI Raw Data](FBI_CRIME_SS.png)
+
+Violent Crime Rate Data: Source, FBI. Violent crime rate represent total reported violent crimes (murder, rape, aggravated assault, robbery) reported per 100,000 members of the popultion. I.E. Crime rate of 500 means 500 violent crimes reported per 100,000 population.
+
+**CDC Drug Data**
+
+![CDC Raw Overdose Data](CDC_OVERDOSE_SS.png)
+
+Drug Overdose Data: Source, Center for Disease Control and Prevention, National Center for Health Statistics
+
+
+![](Wrangled_Data_SS.png)
+Wrangled & Combined data of interest: 2004-2013 Drug Overdoses, Violent Crime, and Taylor Swift’s Popularity. Sources: FBI, CDC, Google Trends “Taylor Swift”. 
+
+```{r}
+library(dplyr);
+library(tidyverse);
+```
+
+## R
+
+[**Taylor Swift Google Trends Data & Wrangling**]{.underline}
+
+```{r}
+#load in the Google Trends data on "Taylor Swift"
+library(readr);
+Taylor_Interest_Over_Time <- read_csv("Taylor_Interest_Over_Time.csv", 
+    skip = 1)
+print(Taylor_Interest_Over_Time)
+#skips data label as this is not the data, but is part of the raw CSV format 
+```
+
+```{r}
+# Wrangle the data to be more usable
+result <- Taylor_Interest_Over_Time %>% #Seperate Wider to get "YYYY" Column
+  # Split the "Month" column into year and month. Current format is "YYYY-MM"
+  separate("Month", into = c("year", "Month_new"), sep = "-", convert = TRUE) %>%
+  # Rename the popularity metric column
+  rename(Popularity = `taylor swift: (United States)`) %>%
+  # Convert "<1" to 0.5 in the Popularity column to avoid calculation errors. Approximation
+  mutate(Popularity = if_else(Popularity == "<1", 0.5, as.numeric(Popularity)))
+```
+
+```{r}
+# Aggregate Taylor Swift Data monthly data to yearly sums
+Taylor_swift_popularity_yearly_sums <- result %>%
+  group_by(year) %>%
+  summarise(total_count = sum(Popularity)) %>%
+  arrange(year);
+# Print the result
+print(Taylor_swift_popularity_yearly_sums)
+```
+
+```{r}
+# Generate a "synonym" by converting "2004" type values for year to 
+"Two Thousand and Four"
+
+# Chat GPT was used with prompt "I want to convert the year column from displaying "2001" to "two thousand and one" for each year" to generate the following function
+
+number_to_words <- function(num) {
+  ones <- c("", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+  tens <- c("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
+  teens <- c("ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen")
+  
+  thousands <- num %/% 1000
+  remainder <- num %% 1000
+  
+  result <- if (thousands > 0) paste(ones[thousands + 1], "thousand") else ""
+  
+  if (remainder >= 100) {
+    hundreds <- remainder %/% 100
+    result <- paste(result, ones[hundreds + 1], "hundred")
+    remainder <- remainder %% 100
+  }
+  
+  if (remainder > 0) {
+    if (nchar(result) > 0) result <- paste(result, "and")
+    if (remainder < 20) {
+      result <- paste(result, if (remainder < 10) ones[remainder + 1] else teens[remainder - 9])
+    } else {
+      result <- paste(result, tens[remainder %/% 10 + 1], ones[remainder %% 10 + 1])
+    }
+  }
+  
+  return(trimws(result))
+}
+
+Taylor_swift_popularity_yearly_sums <- Taylor_swift_popularity_yearly_sums %>%
+  mutate(year = sapply(year, function(x) tools::toTitleCase(number_to_words(as.numeric(x)))))
+print(Taylor_swift_popularity_yearly_sums)
+```
+The above table will be our pseudo synonym data source. "Two Thousand and Four" is a synonym for "2004" which we will wrangle before a subsequent Join operation into a master data table. 
+
+```{r}
+
+# Create a function to map the numeric year values to language format
+year_to_numeric <- function(year_text) {
+  year_mapping <- c(
+    "Two Thousand and Four" = 2004, "Two Thousand and Five" = 2005,
+    "Two Thousand and Six" = 2006, "Two Thousand and Seven" = 2007,
+    "Two Thousand and Eight" = 2008, "Two Thousand and Nine" = 2009,
+    "Two Thousand and Ten" = 2010, "Two Thousand and Eleven" = 2011,
+    "Two Thousand and Twelve" = 2012, "Two Thousand and Thirteen" = 2013
+  )
+  return(year_mapping[year_text])
+}
+
+# Apply the language to numeric "YYYY" conversion 
+Taylor_swift_popularity_yearly_sums <-Taylor_swift_popularity_yearly_sums %>%
+  mutate(year = sapply(year, year_to_numeric))
+
+# Display the result
+print(Taylor_swift_popularity_yearly_sums)
+```
+This sentence format for years has been handled and now all our synonyms are ready for subsequent joins. 
+
+[**FBI Crime Data & Wrangling**]{.underline}
+
+```{r}
+#Load FBI Violent Crime Data
+library(readxl)
+FBI_violent_crime_per_year <- read_excel("FBI_violent_crime_per_year.xls", 
+    skip = 3)
+print(FBI_violent_crime_per_year)
+```
+
+```{r}
+#get only the data of interest (Year & Crime Rate)
+new_data_frame <- FBI_violent_crime_per_year |>
+  select("Year", "Violent \ncrime \nrate") |>
+  rename(year = Year, crime_rate = `Violent \ncrime \nrate`)
+```
+
+```{r}
+# Drop the last 7 rows as these are footnotes in the raw data table (see png)
+FBI_Crime_Rate <- head(new_data_frame, -7)
+# Fix the typos in the year column (typos introduced by footnotes)
+FBI_Crime_Rate$year <- ifelse(FBI_Crime_Rate$year == 20186, 2018, FBI_Crime_Rate$year)
+FBI_Crime_Rate$year <- ifelse(FBI_Crime_Rate$year == 20015, 2001, FBI_Crime_Rate$year)
+```
+
+```{r}
+# Convert the year column to numeric for subsequent join
+FBI_Crime_Rate$year <- as.numeric(FBI_Crime_Rate$year)
+# View the result 
+print(FBI_Crime_Rate)
+```
+
+```{r}
+# Rename columns in the combined dataframe. Combining Taylor Swift and FBI data
+combined_data <- FBI_Crime_Rate %>%
+  inner_join(Taylor_swift_popularity_yearly_sums, by = "year") %>%
+  rename(
+    `FBI Violent Crime` = crime_rate,
+    `Taylor Swift Popularity` = total_count
+  )
+# View the result
+print(combined_data)
+```
+
+[**CDC (National Center for Health Statistics) Drug Data & Wrangling**]{.underline}
+
+Drug Overdose Data: Source, Center for Disease Control and Prevention, National Center for Health Statistics
+
+```{r}
+# Drug_Use_Data
+# Load and preview the CDC Drug Data
+library(readxl)
+Overdose_table <- read_excel("Overdose table.xlsx", 
+    skip = 2) #Skip top labels as this is not the data 
+```
+
+```{r}
+library(dplyr)
+library(stringr)
+# Remove "....." from year entries from raw formatting 
+Overdose_table <- Overdose_table %>%
+  mutate(Year = as.integer(str_replace_all(Year, "[^\\d]", ""))) #convert to numeric for subsuquent join
+```
+
+```{r}
+library(dplyr)
+# Rename the "Year" column to "year"
+Overdose_table <- Overdose_table %>%
+  rename(year = Year) #making cases the same for subsequent Join
+# Display the first few rows 
+print(Overdose_table)
+```
+
+```{r}
+#Extract only Total deaths and Year columns 
+Overdose_table_subset <- Overdose_table %>%
+  select(1:2) %>%
+  rename(year = 1, number_of_deaths = 2)  # Rename columns for clarity
+# Display the first few rows of the new data frame
+print(head(Overdose_table_subset))
+```
+
+Combined Data from all 3 sources, Master Table for Analysis
+
+```{r}
+library(dplyr)
+# Join with Previous combined data with CDC data to create master table
+TaylorSwift_ViolentCrime_DrugOverdose <- combined_data %>%
+  left_join(Overdose_table_subset, by = "year") %>%
+  rename(`Drug Overdoses` = number_of_deaths)
+# Display the first few rows of the joined dataframe
+print(TaylorSwift_ViolentCrime_DrugOverdose)
+```
+
+Combined data of interest: (2004-2019) Drug Overdoses, Violent Crime, and Taylor Swift’s Popularity from 2004-2024. Sources: FBI, CDC, Google Trends “Taylor Swift”
+
+[**Data Analysis & Visualization**]{.underline}
+
+```{r}
+#Scale all data to range from 0-100 for graphical visualization of relative trends per dataset
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+# Step 1: Scale all columns except 'year' from 0 to 100
+scale_0_100 <- function(x) {
+  return((x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE)) * 100)
+}
+# Apply scaling to all columns except 'year'
+scaled_data <- TaylorSwift_ViolentCrime_DrugOverdose %>%
+  mutate(across(-year, scale_0_100))
+# Step 2: Reshape data for plotting (from wide to long format)
+scaled_data_long <- scaled_data %>%
+  pivot_longer(cols = -year, names_to = "variable", values_to = "value")
+# Step 3: Create the plot using ggplot2
+ggplot(scaled_data_long, aes(x = year, y = value, color = variable)) +
+  geom_line(size = 1) +            # Line plot
+  geom_point(size = 3) +           # Add points for each data point
+  labs(title = "Scaled Values of Violent Crime, Popularity, and Drug Overdoses Over Time",
+       x = "Year", y = "Scaled Values") +
+  theme_minimal() +                # Clean theme
+  scale_color_manual(values = c("red", "pink", "black")) + # Custom colors
+  theme(legend.title = element_blank()) + # Remove legend title
+  theme(panel.grid.major = element_line(color = "gray", size = 0.5)) # Add gridlines
+```
+
+**Figure(1)** Scatterplot showing Drug Overdoses, Violent Crime, and Taylor Swift's Popularity from 2004-2024. Sources: FBI, CDC, Google Trends "Taylor Swift"
+
+```{r}
+#Same comparison but visualized with grouped bar chart
+# Step 1: Scale all columns except 'year' from 0 to 100
+scale_0_100 <- function(x) {
+  return((x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE)) * 100)
+}
+# Apply scaling to all columns except 'year'
+scaled_data <- TaylorSwift_ViolentCrime_DrugOverdose %>%
+  mutate(across(-year, scale_0_100))
+# Step 2: Reshape data for plotting (from wide to long format)
+scaled_data_long <- scaled_data %>%
+  pivot_longer(cols = -year, names_to = "variable", values_to = "value")
+# Step 3: Create the grouped bar plot using ggplot2
+ggplot(scaled_data_long, aes(x = factor(year), y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9), width = 0.8) +
+  labs(title = "Scaled Values of Violent Crime, Popularity, and Drug Overdoses by Year",
+       x = "Year", 
+       y = "Scaled Values") +
+  scale_fill_manual(values = c("FBI Violent Crime" = "red", 
+                               "Taylor Swift Popularity" = "pink", 
+                               "Drug Overdoses" = "black"),
+                    name = "Metric") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom") +
+  scale_y_continuous(limits = c(0, 100)) +
+  geom_text(aes(label = round(value, 1)), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5, 
+            size = 3)
+```
+
+**Figure(2)** Grouped Bar Chart showing Drug Overdoses, Violent Crime, and Taylor Swift's Popularity from 2004-2024. Sources: FBI, CDC, Google Trends "Taylor Swift
+
+```{r}
+# Step 1: Scale all columns except 'year' from 0 to 100
+scale_0_100 <- function(x) {
+  return((x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE)) * 100)
+}
+# Apply scaling to all columns except 'year'
+scaled_data <- TaylorSwift_ViolentCrime_DrugOverdose %>%
+  mutate(across(-year, scale_0_100))
+# Step 2: Select only the columns for 'Taylor Swift Popularity' and 'Drug Overdoses'
+scaled_data_subset <- scaled_data %>%
+  select(year, `Taylor Swift Popularity`, `Drug Overdoses`)
+# Step 3: Reshape data for plotting (from wide to long format)
+scaled_data_long <- scaled_data_subset %>%
+  pivot_longer(cols = -year, names_to = "variable", values_to = "value")
+# Step 4: Create the plot using ggplot2
+ggplot(scaled_data_long, aes(x = factor(year), y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9), width = 0.8) +
+  labs(title = "Scaled Values of Taylor Swift Popularity and Drug Overdoses by Year",
+       x = "Year", 
+       y = "Scaled Values") +
+  scale_fill_manual(values = c("Taylor Swift Popularity" = "pink", 
+                               "Drug Overdoses" = "black"),
+                    name = "Metric") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom") +
+  scale_y_continuous(limits = c(0, 100)) +
+  geom_text(aes(label = round(value, 1)), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5, 
+            size = 3)
+```
+
+**Figure(3)** Grouped Bar Chart showing Drug Overdoses, Violent Crime, and Taylor Swift's Popularity from 2004-2024. Sources: FBI, Substance Abuse and Mental Health Services Administration, Google Trends "Taylor Swift
+
+Here we see a clear year by year correlation between Tatylor Swift's rise in popularity and drug overdoses in The United States of America. It's horrific that Ms. Swift's music is causing these deaths, but such is life.
+
+```{r}
+#Show correlation between drug overdose and popularity with a scatterplot/trendline
+# Create the plot
+ggplot(scaled_data, aes(x = year)) +
+  # Scatter plot for Taylor Swift Popularity
+  geom_point(aes(y = `Taylor Swift Popularity`, color = "Taylor Swift Popularity"), size = 3) +
+  # Scatter plot for Drug Overdoses
+  geom_point(aes(y = `Drug Overdoses`, color = "Drug Overdoses"), size = 3, shape = 15) +
+  # Fitted line for Taylor Swift Popularity
+  geom_smooth(aes(y = `Taylor Swift Popularity`, color = "Taylor Swift Popularity"), 
+              method = "lm", se = FALSE, linetype = "dashed") +
+  # Fitted line for Drug Overdoses
+  geom_smooth(aes(y = `Drug Overdoses`, color = "Drug Overdoses"), 
+              method = "lm", se = FALSE, linetype = "dashed") +
+  # Customize colors
+  scale_color_manual(values = c("Taylor Swift Popularity" = "pink", "Drug Overdoses" = "black")) +
+  # Labels and title
+  labs(title = "Scaled Values of Taylor Swift Popularity and Drug Overdoses Over Time",
+       x = "Year",
+       y = "Scaled Value (0 to 100)",
+       color = "") +
+  # Customize the theme
+  theme_minimal() +
+  theme(legend.position = "top",
+        panel.grid.major = element_line(color = "gray", linetype = "dotted"),
+        axis.text.x = element_text(angle = 0, hjust = 0.5)) +
+  # Set y-axis limits
+  scale_y_continuous(limits = c(0, 100)) +
+  # Set x-axis to show all years
+  scale_x_continuous(breaks = scaled_data$year)
+```
+
+**Figure(4)** Scatterplot with trendline showing Drug Overdoses, Violent Crime, and Taylor Swift's Popularity from 2004-2013. Sources: FBI, CDC, Google Trends "Taylor Swift
+
+We again see a clear year by year correlation between Tatylor Swift's rise in popularity and drug overdoses in The United States of America. It's horrific that Ms. Swift's music is causing these deaths, but such is life.
+
+```{r}
+# Create the plot
+ggplot(scaled_data, aes(x = year)) +
+  # Line and points for Taylor Swift Popularity
+  geom_line(aes(y = `Taylor Swift Popularity`, color = "Taylor Swift Popularity"), size = 1) +
+  geom_point(aes(y = `Taylor Swift Popularity`, color = "Taylor Swift Popularity"), size = 3) +
+  # Line and points for Violent Crime Rate
+  geom_line(aes(y = `FBI Violent Crime`, color = "FBI Violent Crime"), size = 1) +
+  geom_point(aes(y = `FBI Violent Crime`, color = "FBI Violent Crime"), size = 3, shape = 15) +
+  # Customize colors
+  scale_color_manual(values = c("Taylor Swift Popularity" = "pink", "FBI Violent Crime" = "red")) +
+  # Labels and title
+  labs(title = "Scaled Values of Taylor Swift Popularity and FBI Violent Crime Over Time",
+       x = "Year",
+       y = "Scaled Value (0 to 100)",
+       color = "") +
+  # Customize the theme
+  theme_minimal() +
+  theme(legend.position = "top",
+        panel.grid = element_blank(),  # Remove all grid lines
+        axis.text.x = element_text(angle = 0, hjust = 0.5)) +
+  # Set y-axis limits
+  scale_y_continuous(limits = c(0, 100)) +
+  # Set x-axis to show all years
+  scale_x_continuous(breaks = scaled_data$year)
+
+```
+
+**Figure(5)** Scatterplot showing Drug Overdoses, Violent Crime, and Taylor Swift's Popularity from 2004-2013. Sources: FBI, CDC, Google Trends "Taylor Swift
+
+Shockingly Ms. Swifts Music seems to have a calming affect on American citizens. Perhaps Taylor is sending Americans into a drug-ridden stupor.
+
+Altogether,this work provides unequivocal evidence of Taylor Swifts corruption of America. Ms. Swift's music lulls masses into a a drug ridden complaceny.
+
+Future work needs to investigate the negative correlation between Ms. Swift's music and Violent Crime Rate in America. One plausible explanation is that Ms. Swift's music triggers downregulation of testosterone production in males, leading to reduced violent crime.
+
+## SQL
+
+```{r}
+library(DBI)
+library(RSQLite)
+library(readxl)
+```
+
+```{r}
+# Create a connection to an SQLite database
+con <- dbConnect(RSQLite::SQLite(), ":memory:")
+```
+
+```{r}
+# Load Taylor Swift Popularity Data
+Taylor_Interest <- read.csv("Taylor_Interest_Over_Time.csv", skip = 1)
+dbWriteTable(con, "Taylor_Interest", Taylor_Interest)
+
+# Load FBI Violent Crime Data
+FBI_Crime <- read_excel("FBI_violent_crime_per_year.xls", skip = 3)
+dbWriteTable(con, "FBI_Crime", FBI_Crime)
+
+# Load Drug Overdose Data
+Overdose_Data <- read_excel("Overdose table.xlsx", skip = 2)
+dbWriteTable(con, "Overdose_Data", Overdose_Data)
+
+```
+
+```{sql connection=con}
+-- Get the Raw Taylor Swift Google Trends data
+SELECT * FROM Taylor_Interest
+```
+
+```{sql connection=con}
+-- Seperate Wider to get year and month columns. Handle <1 values with 0.5 Approximation for calculations
+CREATE TABLE Taylor_Interest_Transformed AS
+SELECT 
+    CAST(substr(Month, 1, 4) AS INTEGER) AS year,
+    CAST(substr(Month, 6, 2) AS INTEGER) AS Month_new,
+    CASE 
+        WHEN `taylor.swift...United.States.` = '<1' THEN 0.5
+        ELSE CAST(`taylor.swift...United.States.` AS REAL)
+    END AS Popularity
+FROM 
+    Taylor_Interest;
+```
+
+```{sql connection=con}
+-- Get the changed Taylor Swift Google Trends data
+SELECT * FROM Taylor_Interest_Transformed 
+```
+
+```{sql connection=con}
+-- Aggregate the totals after grouping by year
+SELECT 
+    year,
+    SUM(Popularity) AS Total_Interest
+FROM 
+    Taylor_Interest_Transformed
+GROUP BY 
+    year
+ORDER BY 
+    year;
+```
+
+```{sql connection=con}
+-- Create the table to store for later 
+CREATE TABLE Taylor_Swift_Interest_Clean AS
+SELECT 
+        year,
+        SUM(Popularity) AS total_count
+    FROM 
+        Taylor_Interest_Transformed
+    GROUP BY 
+        year
+    ORDER BY 
+        year;
+```
+
+
+```{sql connection=con}
+-- Get the FBI data
+SELECT * FROM FBI_crime
+```
+
+```{sql connection=con}
+-- View Data structure. The column names have hidden characters so you'll need to use this to correctly wrangle data
+PRAGMA table_info(FBI_crime);
+```
+
+```{sql connection=con}
+-- Extract the data of interest (Year & Crime Rate)
+SELECT 
+    Year AS year,
+    `Violent 
+crime 
+rate` AS crime_rate
+FROM 
+    FBI_crime;
+```
+
+```{sql connection=con}
+-- Extract the data of interest (Year & Crime Rate) and number the rows for the ability to remove the last 7 rows which are just footnotes. 
+WITH numbered_rows AS (
+    SELECT 
+        Year AS year,
+        `Violent 
+crime 
+rate` AS crime_rate,
+        ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS row_num
+    FROM FBI_crime
+    WHERE CAST(Year AS INTEGER) IS NOT NULL
+)
+SELECT year, crime_rate
+FROM numbered_rows
+WHERE row_num <= (SELECT COUNT(*) FROM numbered_rows) - 7
+
+```
+
+```{sql connection=con}
+-- Create the clean data from the FBI data and save it for later Join, fix typos from footnotes 
+CREATE TABLE FBI_Crime_Clean AS
+WITH numbered_rows AS (
+    SELECT 
+        CASE 
+            WHEN Year = 20015 THEN 2001
+            WHEN Year = 20186 THEN 2018
+            ELSE Year
+        END AS year,
+        `Violent 
+crime 
+rate` AS crime_rate,
+        ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS row_num
+    FROM FBI_crime
+    WHERE CAST(Year AS INTEGER) IS NOT NULL
+)
+SELECT year, crime_rate
+FROM numbered_rows
+WHERE row_num <= (SELECT COUNT(*) FROM numbered_rows) - 7
+```
+
+Wrangled FBI Crime data ready for use.
+
+```{sql connection=con}
+-- Get the CDC data
+SELECT * FROM Overdose_Data
+```
+
+```{sql connection=con}
+-- Remove the "....." formatting of the raw data
+UPDATE Overdose_Data
+SET Year = CAST(REPLACE(REPLACE(REPLACE(Year, '.', ''), ' ', ''), '-', '') AS INTEGER);
+```
+
+```{sql connection=con}
+-- Get the data
+Select * FROM Overdose_Data
+```
+
+```{sql connection=con}
+-- Mutate year to lowercase year for subsequent join
+ALTER TABLE Overdose_Data
+RENAME COLUMN Year TO year;
+```
+
+```{sql connection=con}
+-- View the data
+SELECT *
+FROM Overdose_Data
+LIMIT 5;
+```
+
+```{sql connection=con}
+-- Get the data of interest and create a table
+CREATE TABLE Overdose_Data_Clean AS
+SELECT 
+    year,
+    `Number of deaths...2` AS number_of_deaths
+FROM Overdose_Data;
+```
+
+```{sql connection=con}
+-- Get the wrangled CDC data
+SELECT * FROM Overdose_Data_Clean
+```
+
+```{sql connection=con}
+-- Join the CDC overdose data and FBI violent crime data
+SELECT 
+    o.year,
+    o.number_of_deaths AS overdose_deaths,
+    f.crime_rate
+FROM 
+    Overdose_Data_Clean o
+INNER JOIN 
+    FBI_Crime_Clean f
+ON 
+    o.year = f.year;
+```
+
+```{sql connection=con}
+-- Join all 3 data sets and create the master table for analysis
+CREATE TABLE FBI_Drugs_TaylorSwift AS
+SELECT 
+    o.year,
+    o.number_of_deaths AS overdose_deaths,
+    f.crime_rate,
+    t.total_count AS taylor_swift_interest
+FROM 
+    Overdose_Data_Clean o
+INNER JOIN 
+    FBI_Crime_Clean f ON o.year = f.year
+INNER JOIN 
+    Taylor_Swift_Interest_Clean t ON o.year = t.year;
+```
+
+```{sql connection=con}
+-- SHow the master table
+SELECT * FROM FBI_Drugs_TaylorSwift
+```
+Combined data of interest: (2004-2013) Drug Overdoses, Violent Crime, and Taylor Swift’s Popularity from 2004-2013. Sources: FBI, CDC, Google Trends “Taylor Swift”
+
+## PYTHON
+
+```{python}
+import pandas as pd
+
+Taylor_Interest_Over_Time = pd.read_csv("Taylor_Interest_Over_Time.csv", skiprows=1)
+print(Taylor_Interest_Over_Time)
+```
+
+```{python}
+import pandas as pd
+
+# Transform the data to be more usable
+result = Taylor_Interest_Over_Time.copy()
+
+# Split the "Month" column into year and month
+result[['year', 'Month_new']] = result['Month'].str.split('-', expand=True)
+
+# Rename the popularity metric column
+result = result.rename(columns={'taylor swift: (United States)': 'Popularity'})
+
+# Convert "<1" to 0.5 in the Popularity column
+result['Popularity'] = result['Popularity'].replace('<1', '0.5')
+result['Popularity'] = pd.to_numeric(result['Popularity'])
+
+# Convert year to numeric type
+result['year'] = pd.to_numeric(result['year'])
+
+print(result)
+```
+
+```{python}
+import pandas as pd
+
+# Aggregate Taylor Swift Data monthly data to yearly sums
+Taylor_swift_popularity_yearly_sums = result.groupby('year')['Popularity'].sum().reset_index()
+
+# Arrange by year
+Taylor_swift_popularity_yearly_sums = Taylor_swift_popularity_yearly_sums.sort_values(by='year')
+
+# Print the result
+print(Taylor_swift_popularity_yearly_sums)
+```
+
+```{python}
+ # Generate a "synonym" by converting "2004" type values for year to 
+"Two Thousand and Four"
+
+# Chat GPT was used with prompt "I want to convert the year column from displaying "2001" to "two thousand and one" for each year" to generate the following function
+
+import pandas as pd
+
+def number_to_words(num):
+    ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+    tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+    teens = ["ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+
+    if num == 2000:
+        return "two thousand"
+
+    thousands = num // 1000
+    remainder = num % 1000
+
+    result = ""
+    if thousands > 0:
+        result += ones[thousands] + " thousand"
+
+    if remainder >= 100:
+        hundreds = remainder // 100
+        result += " " + ones[hundreds] + " hundred"
+        remainder %= 100
+
+    if remainder > 0:
+        if len(result) > 0:
+            result += " and"
+        if remainder < 20:
+            if remainder < 10:
+                result += " " + ones[remainder]
+            else:
+                result += " " + teens[remainder - 10]
+        else:
+            result += " " + tens[remainder // 10]
+            if remainder % 10 != 0:
+                result += " " + ones[remainder % 10]
+
+    return result.strip()
+
+
+Taylor_swift_popularity_yearly_sums['year'] = Taylor_swift_popularity_yearly_sums['year'].apply(number_to_words)
+
+# Capitalize the first letter of each word
+Taylor_swift_popularity_yearly_sums['year'] = Taylor_swift_popularity_yearly_sums['year'].apply(lambda x: ' '.join(word.capitalize() for word in x.split()))
+print(Taylor_swift_popularity_yearly_sums)
+
+```
+
+```{python}
+#Convert back to handle the synonym to alighn with the numeric form of year in our other data sources
+import pandas as pd
+
+# Define the mapping dictionary with the correct format
+year_mapping = {
+    "Two Thousand And Four": 2004,
+    "Two Thousand And Five": 2005,
+    "Two Thousand And Six": 2006,
+    "Two Thousand And Seven": 2007,
+    "Two Thousand And Eight": 2008,
+    "Two Thousand And Nine": 2009,
+    "Two Thousand And Ten": 2010,
+    "Two Thousand And Eleven": 2011,
+    "Two Thousand And Twelve": 2012,
+    "Two Thousand And Thirteen": 2013,
+    "Two Thousand And Fourteen": 2014,
+    "Two Thousand And Fifteen": 2015,
+    "Two Thousand And Sixteen": 2016,
+    "Two Thousand And Seventeen": 2017,
+    "Two Thousand And Eighteen": 2018,
+    "Two Thousand And Nineteen": 2019,
+    "Two Thousand And Twenty": 2020,
+    "Two Thousand And Twenty One": 2021,
+    "Two Thousand And Twenty Two": 2022,
+    "Two Thousand And Twenty Three": 2023,
+    "Two Thousand And Twenty Four": 2024
+}
+
+# Replace the 'year' column with numeric values
+Taylor_swift_popularity_yearly_sums["year"] = Taylor_swift_popularity_yearly_sums["year"].map(year_mapping)
+print(Taylor_swift_popularity_yearly_sums)
+
+```
+
+```{python}
+import pandas as pd
+
+# Load FBI Violent Crime Data
+FBI_violent_crime_per_year = pd.read_excel("FBI_violent_crime_per_year.xls", skiprows=3)
+
+# Print the result
+print(FBI_violent_crime_per_year)
+```
+
+```{python}
+# Get the column names
+columns = FBI_violent_crime_per_year.columns
+
+# Find the 'Year' column (case-insensitive)
+year_column = [col for col in columns if 'year' in col.lower()][0]
+
+# Find the 'Violent crime rate' column (case-insensitive and ignoring newlines)
+crime_rate_column = [col for col in columns if 'violent' in col.lower() and 'crime' in col.lower() and 'rate' in col.lower()][0]
+
+# Select crime rate and year columns and rename them
+new_data_frame = FBI_violent_crime_per_year[[year_column, crime_rate_column]].copy()
+new_data_frame = new_data_frame.rename(columns={year_column: "year", crime_rate_column: "crime_rate"})
+
+# Print the result
+print(new_data_frame)
+```
+
+```{python}
+# Drop the last 7 rows as these are footnotes 
+FBI_Crime_Rate = new_data_frame.iloc[:-7].copy()
+
+# Fix the typos in the year column introduced by the footnotes 
+FBI_Crime_Rate['year'] = FBI_Crime_Rate['year'].replace({20186: 2018, 20015: 2001})
+
+# Convert year to integer type
+FBI_Crime_Rate['year'] = FBI_Crime_Rate['year'].astype(int)
+
+# Print the result
+print(FBI_Crime_Rate)
+```
+
+```{python}
+# Convert the year column to numeric
+FBI_Crime_Rate['year'] = pd.to_numeric(FBI_Crime_Rate['year'], errors='coerce')
+
+# View the result and check the structure
+print(FBI_Crime_Rate)
+```
+
+```{python}
+# Perform an inner join and rename columns in the combined dataframe
+combined_data = FBI_Crime_Rate.merge(Taylor_swift_popularity_yearly_sums, on='year', how='inner')
+combined_data = combined_data.rename(columns={
+    'crime_rate': 'FBI Violent Crime',
+    'total_count': 'Taylor Swift Popularity'
+})
+
+# View the result
+print(combined_data)
+```
+
+```{python}
+import pandas as pd
+
+Overdose_table = pd.read_csv('overdose_table.csv')
+print(Overdose_table)
+
+
+```
+
+```{python}
+import pandas as pd
+import re
+
+# Remove "....." from year entries and convert to integer
+Overdose_table['year'] = Overdose_table['year'].apply(lambda x: re.sub(r'[^\d]', '', str(x)))
+Overdose_table['year'] = pd.to_numeric(Overdose_table['year'], errors='coerce').astype('Int64')
+
+# Print the result
+print(Overdose_table)
+```
+
+```{python}
+# Select only Total deaths and Year columns
+Overdose_table_subset = Overdose_table.iloc[:, :2].copy()
+
+# Rename columns for clarity
+Overdose_table_subset = Overdose_table_subset.rename(columns={Overdose_table_subset.columns[0]: 'year', Overdose_table_subset.columns[1]: 'number_of_deaths'})
+
+# Display the first few rows of the new DataFrame
+print(Overdose_table_subset.head())
+
+# Check the structure of the new DataFrame
+print(Overdose_table_subset.info())
+```
+
+```{python}
+import pandas as pd
+
+# Join with Previous combined data and rename data
+TaylorSwift_ViolentCrime_DrugOverdose = combined_data.merge(Overdose_table_subset, on='year', how='left')
+TaylorSwift_ViolentCrime_DrugOverdose = TaylorSwift_ViolentCrime_DrugOverdose.rename(columns={'number_of_deaths': 'Drug Overdoses'})
+
+# Display the first few rows of the joined dataframe
+print(TaylorSwift_ViolentCrime_DrugOverdose)
+```
+Combined data of interest: (2004-2019) Drug Overdoses, Violent Crime, and Taylor Swift’s Popularity from 2004-2024. Sources: FBI, CDC, Google Trends “Taylor Swift”
+
+```{python}
+import pandas as pd
+import matplotlib.pyplot as plt
+
+data = TaylorSwift_ViolentCrime_DrugOverdose
+df = pd.DataFrame(data)
+
+# Function to scale values to range (0–100)
+def scale_0_100(x):
+    return ((x - x.min()) / (x.max() - x.min())) * 100
+
+# Apply scaling to all columns except 'year'
+scaled_data = df.copy()
+for col in scaled_data.columns[1:]:
+    scaled_data[col] = scale_0_100(scaled_data[col])
+```
+
+```{python}
+# Reshape the scaled data for plotting
+scaled_data_long = scaled_data.melt(id_vars=['year'], var_name='variable', value_name='value')
+```
+
+```{python}
+# Create a time series line plot of the scaled values
+plt.figure(figsize=(12, 6))
+
+# Plot each metric's scaled value
+for variable in scaled_data_long['variable'].unique():
+    subset = scaled_data_long[scaled_data_long['variable'] == variable]
+    plt.plot(subset['year'], subset['value'], marker='o', label=variable)
+
+# Add labels and title
+plt.title('Scaled Values of FBI Violent Crime,\nPopularity and Drug Overdoses (2004-2019)', fontsize=14)
+plt.xlabel('Year', fontsize=12)
+plt.ylabel('Scaled Values (0-100)', fontsize=12)
+plt.xticks(scaled_data_long['year'].unique(), rotation=45)
+plt.axhline(0, color='gray', linestyle='--', linewidth=1) # Add a baseline at y=0
+
+# Add legend and grid
+plt.legend(title='Metrics')
+plt.grid(True)
+
+# Show plot
+plt.tight_layout()
+plt.show()
+
+```
+
+```{python}
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Define the data
+data = TaylorSwift_ViolentCrime_DrugOverdose
+
+# Create the DataFrame
+df = pd.DataFrame(data)
+
+# Function to scale values to range (0–100)
+def scale_0_100(x):
+    return ((x - x.min()) / (x.max() - x.min())) * 100
+
+# Apply scaling to all columns except 'year'
+scaled_data = df.copy()
+for col in scaled_data.columns[1:]:
+    scaled_data[col] = scale_0_100(scaled_data[col])
+
+# Reshape data for plotting
+scaled_data_long = scaled_data.melt(id_vars=['year'], var_name='variable', value_name='value')
+
+# Create a bar chart
+plt.figure(figsize=(14, 7))
+
+# Set bar width and positions
+bar_width = 0.25
+x_positions = np.arange(len(scaled_data['year']))
+
+# Plot each variable as a separate set of bars
+for i, variable in enumerate(scaled_data.columns[1:]):
+    plt.bar(x_positions + i * bar_width,
+            scaled_data[variable],
+            width=bar_width,
+            label=variable)
+
+# Add labels and title
+plt.title('Scaled Values of FBI Violent Crime,\nPopularity and Drug Overdoses (2004-2019)', fontsize=14)
+plt.xlabel('Year', fontsize=12)
+plt.ylabel('Scaled Values (0-100)', fontsize=12)
+plt.xticks(x_positions + bar_width / len(scaled_data.columns[1:]), scaled_data['year'], rotation=45)
+
+# Add legend and grid
+plt.legend(title='Metrics')
+plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+# Show plot
+plt.tight_layout()
+plt.show()
+
+```
+
+```{python}
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Define the data
+data = TaylorSwift_ViolentCrime_DrugOverdose
+
+# Create the DataFrame
+df = pd.DataFrame(data)
+
+# Function to scale values to range (0–100)
+def scale_0_100(x):
+    return ((x - x.min()) / (x.max() - x.min())) * 100
+
+# Apply scaling to the columns
+scaled_data = df.copy()
+scaled_data["Popularity"] = scale_0_100(scaled_data["Popularity"])
+scaled_data["Drug Overdoses"] = scale_0_100(scaled_data["Drug Overdoses"])
+
+# Create a Scatter Plot
+plt.figure(figsize=(12, 6))
+plt.scatter(scaled_data["year"], scaled_data["Popularity"], label="Popularity", color='blue', marker='o')
+plt.scatter(scaled_data["year"], scaled_data["Drug Overdoses"], label="Drug Overdoses", color='green', marker='x')
+
+# Add trendlines
+for variable in ["Popularity", "Drug Overdoses"]:
+    z = np.polyfit(scaled_data["year"], scaled_data[variable], deg=1) # Linear fit
+    p = np.poly1d(z)
+    plt.plot(scaled_data["year"], p(scaled_data["year"]), label=f"{variable} Trendline", linestyle='--')
+
+# Add labels and title
+plt.title('Scaled Values Change Over Time for Taylor Swift Popularity and Drug Overdoses', fontsize=14)
+plt.xlabel('Year', fontsize=12)
+plt.ylabel('Scaled Values (0-100)', fontsize=12)
+plt.xticks(scaled_data["year"], rotation=45)
+plt.axhline(0, color='gray', linestyle='--', linewidth=1) # Add a baseline at y=0
+
+# Add legend and grid
+plt.legend(title='Metrics')
+plt.grid(True)
+
+# Show plot
+plt.tight_layout()
+plt.show()
+```
+
+
+## Data Analysis & Visualization
+
+Note: More analysis can be found under each code tab set, here we just show a summary.
+
+Because our data all have different ranges we must scale the data to show percent changes over time as opposed to the raw data. For example the Violent crime rate is on the order of hundreds while the drug overdose deaths are on the order of 100,000. If the data is not scaled the temporal relationship between violent crime, drug use, and Taylor Swift Popularity is obscured, exactly as Taylor Swifts wants. As Data Scientists with a firm grasp on mathematics we are not so easily fooled.
+
+```{r}
+#Scale all data to range from 0-100 for graphical visualization of relative trends per dataset
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+# Step 1: Scale all columns except 'year' from 0 to 100
+scale_0_100 <- function(x) {
+  return((x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE)) * 100)
+}
+# Apply scaling to all columns except 'year'
+scaled_data <- TaylorSwift_ViolentCrime_DrugOverdose %>%
+  mutate(across(-year, scale_0_100))
+# Step 2: Reshape data for plotting (from wide to long format)
+scaled_data_long <- scaled_data %>%
+  pivot_longer(cols = -year, names_to = "variable", values_to = "value")
+# Step 3: Create the plot using ggplot2
+ggplot(scaled_data_long, aes(x = year, y = value, color = variable)) +
+  geom_line(size = 1) +            # Line plot
+  geom_point(size = 3) +           # Add points for each data point
+  labs(title = "Scaled Values of Violent Crime, Popularity, and Drug Overdoses Over Time",
+       x = "Year", y = "Scaled Values") +
+  theme_minimal() +                # Clean theme
+  scale_color_manual(values = c("red", "pink", "black")) + # Custom colors
+  theme(legend.title = element_blank()) + # Remove legend title
+  theme(panel.grid.major = element_line(color = "gray", size = 0.5)) # Add gridlines
+```
+
+**Figure(1)** Scatterplot showing Drug Overdoses, Violent Crime, and Taylor Swift's Popularity from 2004-2024. Sources: FBI, CDC, Google Trends "Taylor Swift"
+
+```{r}
+#Same comparison but visualized with grouped bar chart
+# Step 1: Scale all columns except 'year' from 0 to 100
+scale_0_100 <- function(x) {
+  return((x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE)) * 100)
+}
+# Apply scaling to all columns except 'year'
+scaled_data <- TaylorSwift_ViolentCrime_DrugOverdose %>%
+  mutate(across(-year, scale_0_100))
+# Step 2: Reshape data for plotting (from wide to long format)
+scaled_data_long <- scaled_data %>%
+  pivot_longer(cols = -year, names_to = "variable", values_to = "value")
+# Step 3: Create the grouped bar plot using ggplot2
+ggplot(scaled_data_long, aes(x = factor(year), y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9), width = 0.8) +
+  labs(title = "Scaled Values of Violent Crime, Popularity, and Drug Overdoses by Year",
+       x = "Year", 
+       y = "Scaled Values") +
+  scale_fill_manual(values = c("FBI Violent Crime" = "red", 
+                               "Taylor Swift Popularity" = "pink", 
+                               "Drug Overdoses" = "black"),
+                    name = "Metric") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom") +
+  scale_y_continuous(limits = c(0, 100)) +
+  geom_text(aes(label = round(value, 1)), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5, 
+            size = 3)
+```
+
+**Figure(2)** Grouped Bar Chart showing Drug Overdoses, Violent Crime, and Taylor Swift's Popularity from 2004-2024. Sources: FBI, CDC, Google Trends "Taylor Swift
+
+```{r}
+# Step 1: Scale all columns except 'year' from 0 to 100
+scale_0_100 <- function(x) {
+  return((x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE)) * 100)
+}
+# Apply scaling to all columns except 'year'
+scaled_data <- TaylorSwift_ViolentCrime_DrugOverdose %>%
+  mutate(across(-year, scale_0_100))
+# Step 2: Select only the columns for 'Taylor Swift Popularity' and 'Drug Overdoses'
+scaled_data_subset <- scaled_data %>%
+  select(year, `Taylor Swift Popularity`, `Drug Overdoses`)
+# Step 3: Reshape data for plotting (from wide to long format)
+scaled_data_long <- scaled_data_subset %>%
+  pivot_longer(cols = -year, names_to = "variable", values_to = "value")
+# Step 4: Create the plot using ggplot2
+ggplot(scaled_data_long, aes(x = factor(year), y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9), width = 0.8) +
+  labs(title = "Scaled Values of Taylor Swift Popularity and Drug Overdoses by Year",
+       x = "Year", 
+       y = "Scaled Values") +
+  scale_fill_manual(values = c("Taylor Swift Popularity" = "pink", 
+                               "Drug Overdoses" = "black"),
+                    name = "Metric") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom") +
+  scale_y_continuous(limits = c(0, 100)) +
+  geom_text(aes(label = round(value, 1)), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5, 
+            size = 3)
+```
+
+**Figure(3)** Grouped Bar Chart showing Drug Overdoses, Violent Crime, and Taylor Swift's Popularity from 2004-2024. Sources: FBI, CDC, Google Trends "Taylor Swift
+
+Here we see a clear year by year correlation between Tatylor Swift's rise in popularity and drug overdoses in The United States of America. It's horrific that Ms. Swift's music is causing these deaths, but such is life.
+
+```{r}
+#Show correlation between drug overdose and popularity with a scatterplot/trendline
+# Create the plot
+ggplot(scaled_data, aes(x = year)) +
+  # Scatter plot for Taylor Swift Popularity
+  geom_point(aes(y = `Taylor Swift Popularity`, color = "Taylor Swift Popularity"), size = 3) +
+  # Scatter plot for Drug Overdoses
+  geom_point(aes(y = `Drug Overdoses`, color = "Drug Overdoses"), size = 3, shape = 15) +
+  # Fitted line for Taylor Swift Popularity
+  geom_smooth(aes(y = `Taylor Swift Popularity`, color = "Taylor Swift Popularity"), 
+              method = "lm", se = FALSE, linetype = "dashed") +
+  # Fitted line for Drug Overdoses
+  geom_smooth(aes(y = `Drug Overdoses`, color = "Drug Overdoses"), 
+              method = "lm", se = FALSE, linetype = "dashed") +
+  # Customize colors
+  scale_color_manual(values = c("Taylor Swift Popularity" = "pink", "Drug Overdoses" = "black")) +
+  # Labels and title
+  labs(title = "Scaled Values of Taylor Swift Popularity and Drug Overdoses Over Time",
+       x = "Year",
+       y = "Scaled Value (0 to 100)",
+       color = "") +
+  # Customize the theme
+  theme_minimal() +
+  theme(legend.position = "top",
+        panel.grid.major = element_line(color = "gray", linetype = "dotted"),
+        axis.text.x = element_text(angle = 0, hjust = 0.5)) +
+  # Set y-axis limits
+  scale_y_continuous(limits = c(0, 100)) +
+  # Set x-axis to show all years
+  scale_x_continuous(breaks = scaled_data$year)
+```
+
+**Figure(4)** Scatterplot with trendline showing Drug Overdoses, Violent Crime, and Taylor Swift's Popularity from 2004-2024. Sources: FBI, CDC, Google Trends "Taylor Swift
+
+We again see a clear year by year correlation between Tatylor Swift's rise in popularity and drug overdoses in The United States of America. It's horrific that Ms. Swift's music is causing these deaths, but such is life.
+
+```{r}
+# Create the plot
+ggplot(scaled_data, aes(x = year)) +
+  # Line and points for Taylor Swift Popularity
+  geom_line(aes(y = `Taylor Swift Popularity`, color = "Taylor Swift Popularity"), size = 1) +
+  geom_point(aes(y = `Taylor Swift Popularity`, color = "Taylor Swift Popularity"), size = 3) +
+  # Line and points for Violent Crime Rate
+  geom_line(aes(y = `FBI Violent Crime`, color = "FBI Violent Crime"), size = 1) +
+  geom_point(aes(y = `FBI Violent Crime`, color = "FBI Violent Crime"), size = 3, shape = 15) +
+  # Customize colors
+  scale_color_manual(values = c("Taylor Swift Popularity" = "pink", "FBI Violent Crime" = "red")) +
+  # Labels and title
+  labs(title = "Scaled Values of Taylor Swift Popularity and FBI Violent Crime Over Time",
+       x = "Year",
+       y = "Scaled Value (0 to 100)",
+       color = "") +
+  # Customize the theme
+  theme_minimal() +
+  theme(legend.position = "top",
+        panel.grid = element_blank(),  # Remove all grid lines
+        axis.text.x = element_text(angle = 0, hjust = 0.5)) +
+  # Set y-axis limits
+  scale_y_continuous(limits = c(0, 100)) +
+  # Set x-axis to show all years
+  scale_x_continuous(breaks = scaled_data$year)
+
+```
+
+**Figure(5)** Scatterplot showing Drug Overdoses, Violent Crime, and Taylor Swift's Popularity from 2004-2024. Sources: FBI, CDC, Google Trends "Taylor Swift
+
+Shockingly Ms. Swifts Music seems to have a calming affect on American citizens. Perhaps Taylor is sending Americans into a drug-ridden stupor.
+
+Altogether,this work provides unequivocal evidence of Taylor Swifts corruption of America. Ms. Swift's music lulls masses into a a drug ridden complaceny.
+
+Future work needs to investigate the negative correlation between Ms. Swift's music and Violent Crime Rate in America. One plausible explanation is that Ms. Swift's music triggers downregulation of testosterone production in males, leading to reduced violent crime.
+
+## Challenge
+
+Most of the challenges with the wrangling were introduced by raw data formatting issues. For example footnotes in the FBI crime data introduced typos that needed mutation to remove the additional number. Additionally the FBI data had invisible charaters in the column names which made it confusing when trying to select or extract specific columns. The Google Trends data required wider separation, grouping by year, and aggregation to yield usable data. The CDC overdose data needed extraction of only specific columns.
+
+It was also challenging to join the data sources into a single dataframe as some data was of the structure numeric while others were characters. This required conversion of characters to numeric for subsequent calculation during analysis. SQL was particularly difficult at first as I was unfamiliar with how to setup the database connection. 
+
+Compiling the python, r, and sql code into one html document was challenging and required quite a bit of formatting to get to a point where I was happy with it. 
+
+It was challenging to visualize the trends the data during analysis due to the multiple order of magnitude difference in the scales of our data. For example, violent crime rate has value on the scale of hundreds while overdose deaths per year are in the hundreds of thousands. This was fixed by applying a scaling function to have all data range from 0 to 100 to show year over year percent changes.
+
+## Tools
+
+The data analysis pipeline was successfully implemented in R, SQL, Python, & Excel. In addition the project was compiled into one master html document to present all information in the various languages (excel attached separate). Before this project I had never coded in Python past "Hello World", never had used R, never even heard of SQL, and had certainly never generated an html document. I now feel confident using all of these tools. This project also displays a grasp of statistical analysis and how to analyze data. The inherent disconnection between the data in this project made the analysis a creative process.
+
+I also feel comfortable using terms like extract, separate wider/longer, aggregate, group by, etc when talking about data wrangling  during my professional and conversational life. 
+
+For particular challenging problems such as the initial generation of the year synonym for the Taylor Swift Google Trends data, data scaling, and graphical analyiss AI was used (ChatGPT) to assist in writing functions. This was empowering as AI can be a powerful collaborator.
